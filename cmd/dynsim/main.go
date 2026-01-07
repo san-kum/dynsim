@@ -2,16 +2,23 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/guptarohit/asciigraph"
 	"github.com/san-kum/dynsim/internal/analysis"
+	"github.com/san-kum/dynsim/internal/config"
+	"github.com/san-kum/dynsim/internal/controllers"
 	"github.com/san-kum/dynsim/internal/experiment"
+	"github.com/san-kum/dynsim/internal/sim"
 	"github.com/san-kum/dynsim/internal/store"
+	"github.com/san-kum/dynsim/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -31,12 +38,33 @@ var (
 	kd         float64
 	target     float64
 	numBodies  int
+	// New model parameters
+	theta2  float64 // double pendulum second angle
+	omega2  float64 // double pendulum second angular velocity
+	thrustL float64 // drone left thrust
+	thrustR float64 // drone right thrust
+	// Phase plot axes
+	xAxis int
+	yAxis int
+	// Config file
+	configFile string
+	// Frame rate for live view
+	frameRate int
+	// Preset name
+	preset string
 )
 
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "dynsim",
 		Short: "physics and control simulation lab",
+		Run: func(cmd *cobra.Command, args []string) {
+			// Default to interactive mode when no command given
+			if err := tui.RunInteractive(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		},
 	}
 
 	rootCmd.PersistentFlags().StringVar(&dataDir, "data", ".dynsim", "data directory")
@@ -61,6 +89,10 @@ func main() {
 	runCmd.Flags().Float64Var(&kd, "kd", 5.0, "pid kd")
 	runCmd.Flags().Float64Var(&target, "target", 0.0, "pid target")
 	runCmd.Flags().IntVar(&numBodies, "bodies", 3, "number of bodies (nbody)")
+	runCmd.Flags().Float64Var(&theta2, "theta2", 0.5, "second angle (double_pendulum)")
+	runCmd.Flags().Float64Var(&omega2, "omega2", 0.0, "second angular velocity (double_pendulum)")
+	runCmd.Flags().StringVar(&configFile, "config", "", "config file path (yaml)")
+	runCmd.Flags().StringVar(&preset, "preset", "", "use preset configuration")
 
 	listCmd := &cobra.Command{
 		Use:   "list",
@@ -96,15 +128,162 @@ func main() {
 		RunE:  analyzeRun,
 	}
 
-	rootCmd.AddCommand(runCmd, listCmd, plotCmd, exportCmd, benchCmd, analyzeCmd)
+	// New commands
+	liveCmd := &cobra.Command{
+		Use:   "live [model]",
+		Short: "run simulation with live visualization",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runLive,
+	}
+	liveCmd.Flags().Float64Var(&dt, "dt", 0.01, "timestep")
+	liveCmd.Flags().Float64Var(&duration, "time", 10.0, "duration")
+	liveCmd.Flags().Float64Var(&theta, "theta", 0.5, "initial angle")
+	liveCmd.Flags().Float64Var(&omega, "omega", 0.0, "initial angular velocity")
+	liveCmd.Flags().Float64Var(&pos, "pos", 0.0, "initial position")
+	liveCmd.Flags().Float64Var(&vel, "vel", 0.0, "initial velocity")
+	liveCmd.Flags().Float64Var(&theta2, "theta2", 0.5, "second angle (double_pendulum)")
+	liveCmd.Flags().Float64Var(&omega2, "omega2", 0.0, "second angular velocity")
+	liveCmd.Flags().StringVar(&integrator, "integrator", "rk4", "integrator")
+	liveCmd.Flags().StringVar(&controller, "controller", "none", "controller")
+	liveCmd.Flags().IntVar(&frameRate, "fps", 30, "frame rate")
+
+	phaseCmd := &cobra.Command{
+		Use:   "phase [run_id]",
+		Short: "phase space plot",
+		Args:  cobra.ExactArgs(1),
+		RunE:  phasePlot,
+	}
+	phaseCmd.Flags().IntVar(&xAxis, "x-axis", 0, "state index for x-axis")
+	phaseCmd.Flags().IntVar(&yAxis, "y-axis", 1, "state index for y-axis")
+
+	exportCSVCmd := &cobra.Command{
+		Use:   "export-csv [run_id]",
+		Short: "export run data to CSV",
+		Args:  cobra.ExactArgs(1),
+		RunE:  exportCSV,
+	}
+
+	interactiveCmd := &cobra.Command{
+		Use:     "interactive",
+		Short:   "interactive TUI mode",
+		Aliases: []string{"i", "ui"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return tui.RunInteractive()
+		},
+	}
+
+	compareCmd := &cobra.Command{
+		Use:   "compare [model] [integrator1] [integrator2] ...",
+		Short: "compare integrators on the same model",
+		Args:  cobra.MinimumNArgs(2),
+		RunE:  compareIntegrators,
+	}
+	compareCmd.Flags().Float64Var(&dt, "dt", 0.01, "timestep")
+	compareCmd.Flags().Float64Var(&duration, "time", 10.0, "duration")
+	compareCmd.Flags().Float64Var(&theta, "theta", 0.5, "initial angle")
+
+	presetsCmd := &cobra.Command{
+		Use:   "presets [model]",
+		Short: "list available presets for a model",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			presets := config.ListPresets(args[0])
+			if len(presets) == 0 {
+				fmt.Printf("no presets for model: %s\n", args[0])
+				return nil
+			}
+			fmt.Printf("presets for %s:\n", args[0])
+			for _, p := range presets {
+				fmt.Printf("  %s\n", p)
+			}
+			return nil
+		},
+	}
+
+	exportJSONCmd := &cobra.Command{
+		Use:   "export-json [run_id]",
+		Short: "export run data to JSON",
+		Args:  cobra.ExactArgs(1),
+		RunE:  exportJSON,
+	}
+
+	rootCmd.AddCommand(runCmd, listCmd, plotCmd, exportCmd, benchCmd, analyzeCmd, liveCmd, phaseCmd, exportCSVCmd, interactiveCmd, compareCmd, presetsCmd, exportJSONCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
-
 func runSimulation(cmd *cobra.Command, args []string) error {
 	model := args[0]
+
+	// Load preset if specified
+	if preset != "" {
+		cfg := config.GetPreset(model, preset)
+		if cfg == nil {
+			return fmt.Errorf("unknown preset: %s (available: %v)", preset, config.ListPresets(model))
+		}
+		// Apply preset values
+		dt = cfg.Dt
+		duration = cfg.Duration
+		integrator = cfg.Integrator
+		if cfg.Controller != "" {
+			controller = cfg.Controller
+		}
+		theta = cfg.InitState.Theta
+		omega = cfg.InitState.Omega
+		theta2 = cfg.InitState.Theta2
+		omega2 = cfg.InitState.Omega2
+		pos = cfg.InitState.Pos
+		vel = cfg.InitState.Vel
+	}
+
+	// Load config file if specified (overrides preset)
+	if configFile != "" {
+		cfg, err := config.Load(configFile)
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		// Apply config values (CLI flags override config)
+		if !cmd.Flags().Changed("dt") {
+			dt = cfg.Dt
+		}
+		if !cmd.Flags().Changed("time") {
+			duration = cfg.Duration
+		}
+		if !cmd.Flags().Changed("integrator") {
+			integrator = cfg.Integrator
+		}
+		if !cmd.Flags().Changed("controller") {
+			controller = cfg.Controller
+		}
+		if !cmd.Flags().Changed("theta") {
+			theta = cfg.InitState.Theta
+		}
+		if !cmd.Flags().Changed("omega") {
+			omega = cfg.InitState.Omega
+		}
+		if !cmd.Flags().Changed("pos") {
+			pos = cfg.InitState.Pos
+		}
+		if !cmd.Flags().Changed("vel") {
+			vel = cfg.InitState.Vel
+		}
+		if !cmd.Flags().Changed("kp") {
+			kp = cfg.ControllerParams.Kp
+		}
+		if !cmd.Flags().Changed("ki") {
+			ki = cfg.ControllerParams.Ki
+		}
+		if !cmd.Flags().Changed("kd") {
+			kd = cfg.ControllerParams.Kd
+		}
+		if !cmd.Flags().Changed("target") {
+			target = cfg.ControllerParams.Target
+		}
+		if cfg.Seed != 0 && !cmd.Flags().Changed("seed") {
+			seed = cfg.Seed
+		}
+	}
 
 	st := store.New(dataDir)
 	if err := st.Init(); err != nil {
@@ -141,6 +320,14 @@ func runSimulation(cmd *cobra.Command, args []string) error {
 		initState = []float64{pos, vel, theta, omega}
 	case "nbody":
 		initState = makeNBodyInitialState(numBodies)
+	case "double_pendulum":
+		initState = []float64{theta, theta2, omega, omega2}
+	case "spring_mass":
+		initState = []float64{pos, vel}
+	case "spring_chain":
+		initState = []float64{pos, 0, 0, vel, 0, 0} // 3 masses
+	case "drone":
+		initState = []float64{0, 5, theta, 0, 0, omega} // x, y, theta, vx, vy, omega
 	default:
 		initState = []float64{theta, omega}
 	}
@@ -469,4 +656,319 @@ func analyzeRun(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runLive(cmd *cobra.Command, args []string) error {
+	model := args[0]
+
+	registry := experiment.NewRegistry()
+
+	dyn, err := registry.GetModel(model)
+	if err != nil {
+		return err
+	}
+
+	integ, err := registry.GetIntegrator(integrator)
+	if err != nil {
+		return err
+	}
+
+	controllerParams := map[string]float64{
+		"dim":    float64(dyn.ControlDim()),
+		"kp":     kp,
+		"ki":     ki,
+		"kd":     kd,
+		"target": target,
+	}
+	ctrl, err := registry.GetController(controller, controllerParams)
+	if err != nil {
+		return err
+	}
+
+	var initState []float64
+	switch model {
+	case "cartpole":
+		initState = []float64{pos, vel, theta, omega}
+	case "double_pendulum":
+		initState = []float64{theta, theta2, omega, omega2}
+	case "spring_mass":
+		initState = []float64{pos, vel}
+	case "spring_chain":
+		initState = []float64{pos, 0, 0, vel, 0, 0}
+	case "drone":
+		initState = []float64{0, 5, theta, 0, 0, omega}
+	default:
+		initState = []float64{theta, omega}
+	}
+
+	cfg := experiment.Config{
+		Model:      model,
+		Integrator: integrator,
+		Controller: controller,
+		InitState:  initState,
+		Dt:         dt,
+		Duration:   duration,
+		Seed:       seed,
+		Params:     controllerParams,
+	}
+
+	exp := experiment.New(cfg)
+	if err := exp.Setup(dyn, integ, ctrl, nil); err != nil {
+		return err
+	}
+
+	// Create live renderer
+	renderer := tui.NewLiveRenderer(model, frameRate)
+	renderer.Start()
+	defer renderer.Stop()
+
+	// Run simulation with observer
+	sim := exp.GetSimulator()
+	if sim != nil {
+		sim.AddObserver(renderer)
+	}
+
+	_, err = exp.Run(context.Background())
+	return err
+}
+
+func phasePlot(cmd *cobra.Command, args []string) error {
+	runID := args[0]
+
+	st := store.New(dataDir)
+	meta, err := st.Load(runID)
+	if err != nil {
+		return err
+	}
+
+	states, _, err := st.LoadStates(runID)
+	if err != nil {
+		return err
+	}
+
+	if len(states) == 0 {
+		return fmt.Errorf("no data to plot")
+	}
+
+	if len(states[0]) <= xAxis || len(states[0]) <= yAxis {
+		return fmt.Errorf("state dimension too small for selected axes")
+	}
+
+	fmt.Printf("phase space plot: %s\n", meta.ID)
+	fmt.Printf("model: %s\n", meta.Model)
+	fmt.Printf("x-axis: x%d, y-axis: x%d\n\n", xAxis, yAxis)
+
+	// Extract data for phase plot
+	xData := make([]float64, len(states))
+	yData := make([]float64, len(states))
+	for i := range states {
+		xData[i] = states[i][xAxis]
+		yData[i] = states[i][yAxis]
+	}
+
+	// Find bounds
+	xMin, xMax := xData[0], xData[0]
+	yMin, yMax := yData[0], yData[0]
+	for i := range xData {
+		if xData[i] < xMin {
+			xMin = xData[i]
+		}
+		if xData[i] > xMax {
+			xMax = xData[i]
+		}
+		if yData[i] < yMin {
+			yMin = yData[i]
+		}
+		if yData[i] > yMax {
+			yMax = yData[i]
+		}
+	}
+
+	// Add padding
+	xRange := xMax - xMin
+	yRange := yMax - yMin
+	if xRange == 0 {
+		xRange = 1
+	}
+	if yRange == 0 {
+		yRange = 1
+	}
+
+	// Create ASCII scatter plot
+	width := 70
+	height := 20
+	canvas := make([][]rune, height)
+	for i := range canvas {
+		canvas[i] = make([]rune, width)
+		for j := range canvas[i] {
+			canvas[i][j] = ' '
+		}
+	}
+
+	// Plot points
+	for i := range xData {
+		px := int(float64(width-1) * (xData[i] - xMin) / xRange)
+		py := int(float64(height-1) * (yData[i] - yMin) / yRange)
+		py = height - 1 - py // Flip y-axis
+		if px >= 0 && px < width && py >= 0 && py < height {
+			// Use different characters based on density/time
+			if i < len(xData)/3 {
+				canvas[py][px] = '.'
+			} else if i < 2*len(xData)/3 {
+				canvas[py][px] = 'o'
+			} else {
+				canvas[py][px] = '●'
+			}
+		}
+	}
+
+	// Draw frame
+	fmt.Printf("  %.2f ┌", yMax)
+	for i := 0; i < width; i++ {
+		fmt.Print("─")
+	}
+	fmt.Println("┐")
+
+	for i := range canvas {
+		if i == height/2 {
+			fmt.Printf("  %.2f │", (yMax+yMin)/2)
+		} else {
+			fmt.Print("       │")
+		}
+		fmt.Print(string(canvas[i]))
+		fmt.Println("│")
+	}
+
+	fmt.Printf("  %.2f └", yMin)
+	for i := 0; i < width; i++ {
+		fmt.Print("─")
+	}
+	fmt.Println("┘")
+
+	fmt.Printf("       %.2f", xMin)
+	padding := width - 20
+	for i := 0; i < padding; i++ {
+		fmt.Print(" ")
+	}
+	fmt.Printf("%.2f\n", xMax)
+
+	fmt.Printf("\nLegend: . = early, o = middle, ● = late\n")
+
+	return nil
+}
+
+func exportCSV(cmd *cobra.Command, args []string) error {
+	runID := args[0]
+
+	st := store.New(dataDir)
+	states, times, err := st.LoadStates(runID)
+	if err != nil {
+		return err
+	}
+
+	if len(states) == 0 {
+		return fmt.Errorf("no data to export")
+	}
+
+	w := csv.NewWriter(os.Stdout)
+	defer w.Flush()
+
+	// Header
+	header := []string{"time"}
+	for i := range states[0] {
+		header = append(header, fmt.Sprintf("x%d", i))
+	}
+	if err := w.Write(header); err != nil {
+		return err
+	}
+
+	// Data rows
+	for i := range states {
+		row := []string{strconv.FormatFloat(times[i], 'f', 6, 64)}
+		for _, val := range states[i] {
+			row = append(row, strconv.FormatFloat(val, 'f', 6, 64))
+		}
+		if err := w.Write(row); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func compareIntegrators(cmd *cobra.Command, args []string) error {
+	model := args[0]
+	integrators := args[1:]
+
+	registry := experiment.NewRegistry()
+	dyn, err := registry.GetModel(model)
+	if err != nil {
+		return err
+	}
+
+	initState := []float64{theta, 0}
+	if model == "double_pendulum" {
+		initState = []float64{theta, theta, 0, 0}
+	}
+
+	fmt.Printf("comparing integrators for %s (dt=%.4f, duration=%.1fs)\n\n", model, dt, duration)
+	fmt.Printf("%-12s  %-12s  %-12s  %-12s\n", "integrator", "final_x0", "energy_drift", "time_ms")
+	fmt.Println(strings.Repeat("-", 52))
+
+	for _, intName := range integrators {
+		integ, err := registry.GetIntegrator(intName)
+		if err != nil {
+			fmt.Printf("%-12s  error: %v\n", intName, err)
+			continue
+		}
+
+		ctrl := controllers.NewNone(dyn.ControlDim())
+		s := sim.New(dyn, integ, ctrl)
+
+		cfg := sim.Config{Dt: dt, Duration: duration}
+
+		start := time.Now()
+		result, err := s.Run(context.Background(), initState, cfg)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			fmt.Printf("%-12s  error: %v\n", intName, err)
+			continue
+		}
+
+		finalX0 := 0.0
+		if len(result.States) > 0 && len(result.States[len(result.States)-1]) > 0 {
+			finalX0 = result.States[len(result.States)-1][0]
+		}
+
+		fmt.Printf("%-12s  %12.6f  %12.2e  %12.2f\n", intName, finalX0, result.EnergyDrift, float64(elapsed.Microseconds())/1000)
+	}
+
+	return nil
+}
+
+func exportJSON(cmd *cobra.Command, args []string) error {
+	runID := args[0]
+
+	st := store.New(dataDir)
+	meta, err := st.Load(runID)
+	if err != nil {
+		return err
+	}
+
+	states, times, err := st.LoadStates(runID)
+	if err != nil {
+		return err
+	}
+
+	result := &sim.Result{
+		States:  make([]sim.State, len(states)),
+		Times:   times,
+		Metrics: meta.Metrics,
+	}
+	for i, s := range states {
+		result.States[i] = s
+	}
+
+	return store.ExportJSONStdout(meta.Model, meta.Integrator, meta.Controller, meta.Dt, meta.Duration, result)
 }

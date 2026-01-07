@@ -13,23 +13,47 @@ func NewLQR(k [][]float64, target sim.State) *LQR {
 
 func (l *LQR) Compute(x sim.State, t float64) sim.Control {
 	u := make(sim.Control, len(l.K))
-
 	for i := range u {
 		for j := range x {
 			target := 0.0
 			if j < len(l.Target) {
 				target = l.Target[j]
 			}
-			u[i] -= l.K[i][j] * (x[j] - target)
+			if j < len(l.K[i]) {
+				u[i] -= l.K[i][j] * (x[j] - target)
+			}
 		}
 	}
-
 	return u
 }
 
+var (
+	pendulumGains   = [][]float64{{31.62, 10.0}}
+	cartpoleGains   = [][]float64{{-1.0, -1.73, 35.36, 8.94}}
+	springGains     = [][]float64{{10.0, 6.32}}
+	doublePendGains = [][]float64{{50.0, 40.0, 15.0, 10.0}}
+)
+
 func NewPendulumLQR() *LQR {
+	return NewLQR(pendulumGains, sim.State{0, 0})
+}
+
+func NewCartPoleLQR() *LQR {
+	return NewLQR(cartpoleGains, sim.State{0, 0, 0, 0})
+}
+
+func NewDroneLQR(targetY float64) *LQR {
 	k := [][]float64{
-		{31.62, 10.0},
+		{0.0, -5.0, 10.0, 0.0, -3.5, 2.0},
+		{0.0, -5.0, -10.0, 0.0, -3.5, -2.0},
 	}
-	return NewLQR(k, sim.State{0, 0})
+	return NewLQR(k, sim.State{0, targetY, 0, 0, 0, 0})
+}
+
+func NewDoublePendulumLQR() *LQR {
+	return NewLQR(doublePendGains, sim.State{0, 0, 0, 0})
+}
+
+func NewSpringMassLQR() *LQR {
+	return NewLQR(springGains, sim.State{0, 0})
 }

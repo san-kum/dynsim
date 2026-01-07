@@ -1,0 +1,45 @@
+# DynSim Experiment Configuration
+# Example configuration file for running simulations
+
+# Physics model: pendulum, cartpole, double_pendulum, spring_mass, spring_chain, drone, nbody
+model: pendulum
+
+# Numerical integrator: euler, rk4, verlet
+integrator: rk4
+
+# Controller: none, pid, lqr
+controller: pid
+
+# Time settings
+dt: 0.01        # Timestep in seconds
+duration: 20.0  # Total duration in seconds
+seed: 42        # Random seed (0 = use current time)
+
+# Initial state (model-dependent)
+init_state:
+  # Pendulum / Double Pendulum
+  theta: 0.5    # Initial angle (radians)
+  omega: 0.0    # Initial angular velocity
+  theta2: 0.5   # Second angle (double pendulum only)
+  omega2: 0.0   # Second angular velocity
+  
+  # CartPole
+  pos: 0.0      # Initial cart position
+  vel: 0.0      # Initial cart velocity
+  
+  # N-Body
+  num_bodies: 3
+  
+  # Drone
+  x: 0.0
+  y: 5.0
+  vx: 0.0
+  vy: 0.0
+
+# Controller parameters
+controller_params:
+  # PID gains
+  kp: 10.0
+  ki: 0.1
+  kd: 5.0
+  target: 0.0   # Target value for control

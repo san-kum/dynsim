@@ -49,3 +49,5 @@ testdata/*.out
 *.bak
 *.old
 
+
+.fuse_hidden*

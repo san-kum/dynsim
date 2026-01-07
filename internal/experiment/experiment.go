@@ -56,3 +56,8 @@ func (e *Experiment) Run(ctx context.Context) (*sim.Result, error) {
 
 	return e.simulator.Run(ctx, x0, simCfg)
 }
+
+// GetSimulator returns the underlying simulator for adding observers
+func (e *Experiment) GetSimulator() *sim.Simulator {
+	return e.simulator
+}

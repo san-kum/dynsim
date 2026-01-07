@@ -2,36 +2,55 @@ package integrators
 
 import "github.com/san-kum/dynsim/internal/sim"
 
-type RK4 struct{}
+type RK4 struct {
+	k1, k2, k3, k4 sim.State
+	scratch        sim.State
+}
 
 func NewRK4() *RK4 {
 	return &RK4{}
 }
 
-func (r *RK4) Step(dyn sim.Dynamics, x sim.State, u sim.Control, t float64, dt float64) sim.State {
-
-	k1 := dyn.Derivative(x, u, t)
-	x2 := addScaled(x, k1, dt/2)
-	k2 := dyn.Derivative(x2, u, t+dt/2)
-
-	x3 := addScaled(x, k2, dt/2)
-	k3 := dyn.Derivative(x3, u, t+dt/2)
-
-	x4 := addScaled(x, k3, dt)
-	k4 := dyn.Derivative(x4, u, t+dt)
-
-	result := make(sim.State, len(x))
-	for i := range x {
-		result[i] = x[i] + (dt/6)*(k1[i]+2*k2[i]+2*k3[i]+k4[i])
+func (r *RK4) ensureScratch(n int) {
+	if len(r.k1) != n {
+		r.k1 = make(sim.State, n)
+		r.k2 = make(sim.State, n)
+		r.k3 = make(sim.State, n)
+		r.k4 = make(sim.State, n)
+		r.scratch = make(sim.State, n)
 	}
-
-	return result
 }
 
-func addScaled(x sim.State, dx sim.State, scale float64) sim.State {
-	result := make(sim.State, len(x))
-	for i := range x {
-		result[i] = x[i] + scale*dx[i]
+func (r *RK4) Step(dyn sim.Dynamics, x sim.State, u sim.Control, t, dt float64) sim.State {
+	n := len(x)
+	r.ensureScratch(n)
+
+	k1 := dyn.Derivative(x, u, t)
+	copy(r.k1, k1)
+
+	for i := 0; i < n; i++ {
+		r.scratch[i] = x[i] + dt*0.5*r.k1[i]
 	}
+	k2 := dyn.Derivative(r.scratch, u, t+dt*0.5)
+	copy(r.k2, k2)
+
+	for i := 0; i < n; i++ {
+		r.scratch[i] = x[i] + dt*0.5*r.k2[i]
+	}
+	k3 := dyn.Derivative(r.scratch, u, t+dt*0.5)
+	copy(r.k3, k3)
+
+	for i := 0; i < n; i++ {
+		r.scratch[i] = x[i] + dt*r.k3[i]
+	}
+	k4 := dyn.Derivative(r.scratch, u, t+dt)
+	copy(r.k4, k4)
+
+	result := make(sim.State, n)
+	dt6 := dt / 6.0
+	for i := 0; i < n; i++ {
+		result[i] = x[i] + dt6*(r.k1[i]+2*r.k2[i]+2*r.k3[i]+r.k4[i])
+	}
+
 	return result
 }
