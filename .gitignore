@@ -10,6 +10,7 @@
 
 pkg/
 bin/
+tests/
 
 coverage.out
 coverage.txt

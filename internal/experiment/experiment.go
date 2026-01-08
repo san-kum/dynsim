@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/san-kum/dynsim/internal/sim"
+	"github.com/san-kum/dynsim/internal/dynamo"
 )
 
 type Config struct {
@@ -21,7 +21,7 @@ type Config struct {
 
 type Experiment struct {
 	cfg        Config
-	simulator  *sim.Simulator
+	simulator  *dynamo.Simulator
 	randSource *rand.Rand
 }
 
@@ -32,23 +32,23 @@ func New(cfg Config) *Experiment {
 	}
 }
 
-func (e *Experiment) Setup(dyn sim.Dynamics, integrator sim.Integrator, controller sim.Controller, metrics []sim.Metric) error {
-	e.simulator = sim.New(dyn, integrator, controller)
+func (e *Experiment) Setup(dyn dynamo.System, integrator dynamo.Integrator, controller dynamo.Controller, metrics []dynamo.Metric) error {
+	e.simulator = dynamo.New(dyn, integrator, controller)
 	for _, m := range metrics {
 		e.simulator.AddMetric(m)
 	}
 	return nil
 }
 
-func (e *Experiment) Run(ctx context.Context) (*sim.Result, error) {
+func (e *Experiment) Run(ctx context.Context) (*dynamo.Result, error) {
 	if e.simulator == nil {
 		return nil, fmt.Errorf("experiment not setup")
 	}
 
-	x0 := make(sim.State, len(e.cfg.InitState))
+	x0 := make(dynamo.State, len(e.cfg.InitState))
 	copy(x0, e.cfg.InitState)
 
-	simCfg := sim.Config{
+	simCfg := dynamo.Config{
 		Dt:       e.cfg.Dt,
 		Duration: e.cfg.Duration,
 		Seed:     e.cfg.Seed,
@@ -58,6 +58,6 @@ func (e *Experiment) Run(ctx context.Context) (*sim.Result, error) {
 }
 
 // GetSimulator returns the underlying simulator for adding observers
-func (e *Experiment) GetSimulator() *sim.Simulator {
+func (e *Experiment) GetSimulator() *dynamo.Simulator {
 	return e.simulator
 }

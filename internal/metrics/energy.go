@@ -3,7 +3,7 @@ package metrics
 import (
 	"math"
 
-	"github.com/san-kum/dynsim/internal/sim"
+	"github.com/san-kum/dynsim/internal/dynamo"
 )
 
 type Energy struct {
@@ -26,7 +26,7 @@ func NewEnergy(mass, length, gravity float64) *Energy {
 
 func (e *Energy) Name() string { return e.name }
 
-func (e *Energy) Observe(x sim.State, u sim.Control, t float64) {
+func (e *Energy) Observe(x dynamo.State, u dynamo.Control, t float64) {
 	if len(x) < 2 {
 		return
 	}
@@ -55,10 +55,10 @@ type EnergyDrift struct {
 	currentEnergy float64
 	maxDrift      float64
 	samples       int
-	dyn           sim.Dynamics
+	dyn           dynamo.System
 }
 
-func NewEnergyDrift(dyn sim.Dynamics) *EnergyDrift {
+func NewEnergyDrift(dyn dynamo.System) *EnergyDrift {
 	return &EnergyDrift{
 		name: "energy_drift",
 		dyn:  dyn,
@@ -67,8 +67,8 @@ func NewEnergyDrift(dyn sim.Dynamics) *EnergyDrift {
 
 func (e *EnergyDrift) Name() string { return e.name }
 
-func (e *EnergyDrift) Observe(x sim.State, u sim.Control, t float64) {
-	ec, ok := e.dyn.(sim.EnergyComputer)
+func (e *EnergyDrift) Observe(x dynamo.State, u dynamo.Control, t float64) {
+	ec, ok := e.dyn.(dynamo.Hamiltonian)
 	if !ok {
 		return
 	}

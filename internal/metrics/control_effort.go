@@ -3,7 +3,7 @@ package metrics
 import (
 	"math"
 
-	"github.com/san-kum/dynsim/internal/sim"
+	"github.com/san-kum/dynsim/internal/dynamo"
 )
 
 type ControlEffort struct {
@@ -22,7 +22,7 @@ func (c *ControlEffort) Name() string {
 	return c.name
 }
 
-func (c *ControlEffort) Observe(x sim.State, u sim.Control, t float64) {
+func (c *ControlEffort) Observe(x dynamo.State, u dynamo.Control, t float64) {
 	for _, val := range u {
 		c.sum += math.Abs(val)
 	}

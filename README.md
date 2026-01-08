@@ -2,6 +2,8 @@
 
 physics simulation in your terminal. that's it.
 
+![demo](simulation.gif)
+
 ## install
 
 ```bash
@@ -26,14 +28,25 @@ you get a menu. pick a model. tweak params. watch physics happen.
 
 ## models
 
-| model           | what it does                                        |
-| --------------- | --------------------------------------------------- |
-| pendulum        | swings back and forth. simple harmonic motion.      |
-| double_pendulum | two pendulums chained. goes chaotic.                |
-| cartpole        | balance a stick on a cart. classic control problem. |
-| spring_mass     | bouncy mass on a spring.                            |
-| drone           | 2d quadrotor. tries to hover.                       |
-| nbody           | gravitational attraction between bodies.            |
+| model           | what it does                                          |
+| --------------- | ----------------------------------------------------- |
+| pendulum        | swings back and forth. simple harmonic motion.        |
+| double_pendulum | two pendulums chained. goes chaotic.                  |
+| cartpole        | balance a stick on a cart. classic control problem.   |
+| spring_mass     | bouncy mass on a spring.                              |
+| drone           | 2d quadrotor. tries to hover.                         |
+| nbody           | gravitational attraction between bodies.              |
+| lorenz          | butterfly attractor. classic chaos.                   |
+| rossler         | spiral chaos. simpler than lorenz.                    |
+| vanderpol       | limit cycle oscillator. relaxation oscillations.      |
+| threebody       | three body problem. unstable orbits.                  |
+| coupled         | two pendulums with a spring. energy transfer.         |
+| masschain       | 1d wave equation on a lattice.                        |
+| gyroscope       | spinning top. rigid body dynamics.                    |
+| wave            | vibrating string. pde solved with fdm.                |
+| doublewell      | bistable potential. flip-flop.                        |
+| duffing         | forced oscillator. duffing equation.                  |
+| magnetic        | pendulum over magnets. fractal basins.                |
 
 ## cli
 
@@ -70,12 +83,30 @@ quick demos:
 
 ## integrators
 
-| name   | accuracy   | speed  | use when                        |
-| ------ | ---------- | ------ | ------------------------------- |
-| euler  | low        | fast   | you don't care about accuracy   |
-| rk4    | high       | medium | default, works for most things  |
-| rk45   | adaptive   | varies | stiff systems, long simulations |
-| verlet | symplectic | fast   | energy conservation matters     |
+| name     | accuracy   | speed  | use when                        |
+| -------- | ---------- | ------ | ------------------------------- |
+| euler    | low        | fast   | you don't care about accuracy   |
+| rk4      | high       | medium | default, works for most things  |
+| rk45     | adaptive   | varies | stiff systems, long simulations |
+| verlet   | symplectic | fast   | energy conservation matters     |
+| leapfrog | symplectic | fast   | best for n-body, orbital        |
+
+## gpu acceleration
+
+for large n-body simulations, dynsim uses parallel computation:
+
+- **cpu (default)**: goroutines, scales with cores
+- **cuda (optional)**: nvidia gpu, build with `-tags cuda`
+
+```bash
+# cpu parallel (works everywhere)
+go build -o dynsim cmd/dynsim/main.go
+
+# with cuda (needs cuda toolkit + nvidia gpu)
+go build -tags cuda -o dynsim cmd/dynsim/main.go
+```
+
+nbody auto-selects gpu when n >= 32 bodies.
 
 ## config files
 
@@ -134,16 +165,21 @@ done.
 
 ## keyboard shortcuts (tui)
 
-| key   | what               |
-| ----- | ------------------ |
-| j/k   | move up/down       |
-| enter | select             |
-| s     | start simulation   |
-| space | pause/resume       |
-| +/-   | speed up/slow down |
-| r     | reset              |
-| c     | back to config     |
-| q     | quit               |
+| key     | what                         |
+| ------- | ---------------------------- |
+| j/k     | move up/down, adjust params  |
+| enter   | select / edit                |
+| s       | start simulation             |
+| space   | pause/resume                 |
+| +/-     | zoom (3d cam)                |
+| r       | reset                        |
+| [ / ]   | time travel (scrub history)  |
+| g       | record gif                   |
+| t       | cycle theme                  |
+| m       | toggle multiview             |
+| x/y/z   | rotate camera                |
+| tab     | cycle parameters             |
+| q       | quit                         |
 
 ## why
 

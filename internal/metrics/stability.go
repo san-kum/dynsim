@@ -3,7 +3,7 @@ package metrics
 import (
 	"math"
 
-	"github.com/san-kum/dynsim/internal/sim"
+	"github.com/san-kum/dynsim/internal/dynamo"
 )
 
 type Stability struct {
@@ -24,7 +24,7 @@ func (s *Stability) Name() string {
 	return s.name
 }
 
-func (s *Stability) Observe(x sim.State, u sim.Control, t float64) {
+func (s *Stability) Observe(x dynamo.State, u dynamo.Control, t float64) {
 	s.samples++
 	for _, val := range x {
 		if math.Abs(val) > s.threshold {

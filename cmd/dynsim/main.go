@@ -11,14 +11,15 @@ import (
 	"text/tabwriter"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/guptarohit/asciigraph"
 	"github.com/san-kum/dynsim/internal/analysis"
 	"github.com/san-kum/dynsim/internal/config"
-	"github.com/san-kum/dynsim/internal/controllers"
+	"github.com/san-kum/dynsim/internal/control"
 	"github.com/san-kum/dynsim/internal/experiment"
-	"github.com/san-kum/dynsim/internal/sim"
-	"github.com/san-kum/dynsim/internal/store"
-	"github.com/san-kum/dynsim/internal/tui"
+	"github.com/san-kum/dynsim/internal/dynamo"
+	"github.com/san-kum/dynsim/internal/storage"
+	"github.com/san-kum/dynsim/internal/viz"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +61,7 @@ func main() {
 		Short: "physics and control simulation lab",
 		Run: func(cmd *cobra.Command, args []string) {
 			// Default to interactive mode when no command given
-			if err := tui.RunInteractive(); err != nil {
+			if err := viz.RunInteractive(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
@@ -145,6 +146,10 @@ func main() {
 	liveCmd.Flags().Float64Var(&omega2, "omega2", 0.0, "second angular velocity")
 	liveCmd.Flags().StringVar(&integrator, "integrator", "rk4", "integrator")
 	liveCmd.Flags().StringVar(&controller, "controller", "none", "controller")
+	liveCmd.Flags().Float64Var(&kp, "kp", 10.0, "pid kp")
+	liveCmd.Flags().Float64Var(&ki, "ki", 0.1, "pid ki")
+	liveCmd.Flags().Float64Var(&kd, "kd", 5.0, "pid kd")
+	liveCmd.Flags().Float64Var(&target, "target", 0.0, "pid target")
 	liveCmd.Flags().IntVar(&frameRate, "fps", 30, "frame rate")
 
 	phaseCmd := &cobra.Command{
@@ -168,7 +173,7 @@ func main() {
 		Short:   "interactive TUI mode",
 		Aliases: []string{"i", "ui"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return tui.RunInteractive()
+			return viz.RunInteractive()
 		},
 	}
 
@@ -285,7 +290,7 @@ func runSimulation(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	st := store.New(dataDir)
+	st := storage.New(dataDir)
 	if err := st.Init(); err != nil {
 		return err
 	}
@@ -412,7 +417,7 @@ func sinApprox(x float64) float64 {
 }
 
 func listRuns(cmd *cobra.Command, args []string) error {
-	st := store.New(dataDir)
+	st := storage.New(dataDir)
 	runs, err := st.List()
 	if err != nil {
 		return err
@@ -444,7 +449,7 @@ func listRuns(cmd *cobra.Command, args []string) error {
 func plotRun(cmd *cobra.Command, args []string) error {
 	runID := args[0]
 
-	st := store.New(dataDir)
+	st := storage.New(dataDir)
 	meta, err := st.Load(runID)
 	if err != nil {
 		return err
@@ -513,7 +518,7 @@ func plotRun(cmd *cobra.Command, args []string) error {
 func exportRun(cmd *cobra.Command, args []string) error {
 	runID := args[0]
 
-	st := store.New(dataDir)
+	st := storage.New(dataDir)
 	meta, err := st.Load(runID)
 	if err != nil {
 		return err
@@ -598,7 +603,7 @@ func benchModel(cmd *cobra.Command, args []string) error {
 func analyzeRun(cmd *cobra.Command, args []string) error {
 	runID := args[0]
 
-	st := store.New(dataDir)
+	st := storage.New(dataDir)
 	meta, err := st.Load(runID)
 	if err != nil {
 		return err
@@ -697,45 +702,27 @@ func runLive(cmd *cobra.Command, args []string) error {
 		initState = []float64{pos, 0, 0, vel, 0, 0}
 	case "drone":
 		initState = []float64{0, 5, theta, 0, 0, omega}
+	case "nbody":
+		initState = makeNBodyInitialState(numBodies)
 	default:
 		initState = []float64{theta, omega}
 	}
 
-	cfg := experiment.Config{
-		Model:      model,
-		Integrator: integrator,
-		Controller: controller,
-		InitState:  initState,
-		Dt:         dt,
-		Duration:   duration,
-		Seed:       seed,
-		Params:     controllerParams,
-	}
+	// Initialize TUI Model
+	m := viz.NewModel(dyn, integ, ctrl, initState, dt, model)
 
-	exp := experiment.New(cfg)
-	if err := exp.Setup(dyn, integ, ctrl, nil); err != nil {
+	// Run Bubble Tea Program
+	p := tea.NewProgram(m)
+	if _, err := p.Run(); err != nil {
 		return err
 	}
-
-	// Create live renderer
-	renderer := tui.NewLiveRenderer(model, frameRate)
-	renderer.Start()
-	defer renderer.Stop()
-
-	// Run simulation with observer
-	sim := exp.GetSimulator()
-	if sim != nil {
-		sim.AddObserver(renderer)
-	}
-
-	_, err = exp.Run(context.Background())
-	return err
+	return nil
 }
 
 func phasePlot(cmd *cobra.Command, args []string) error {
 	runID := args[0]
 
-	st := store.New(dataDir)
+	st := storage.New(dataDir)
 	meta, err := st.Load(runID)
 	if err != nil {
 		return err
@@ -860,7 +847,7 @@ func phasePlot(cmd *cobra.Command, args []string) error {
 func exportCSV(cmd *cobra.Command, args []string) error {
 	runID := args[0]
 
-	st := store.New(dataDir)
+	st := storage.New(dataDir)
 	states, times, err := st.LoadStates(runID)
 	if err != nil {
 		return err
@@ -907,8 +894,25 @@ func compareIntegrators(cmd *cobra.Command, args []string) error {
 	}
 
 	initState := []float64{theta, 0}
-	if model == "double_pendulum" {
+	switch model {
+	case "double_pendulum":
 		initState = []float64{theta, theta, 0, 0}
+	case "cartpole":
+		initState = []float64{0, 0, theta, 0}
+	case "nbody":
+		n := 3
+		initState = make([]float64, n*4)
+		for i := 0; i < n; i++ {
+			angle := float64(i) * 2.0 * 3.14159 / float64(n)
+			initState[i*4] = 2.0 * float64(i+1) * 0.5
+			initState[i*4+1] = 0
+			initState[i*4+2] = 0
+			initState[i*4+3] = 0.5 * float64(i+1) * 0.3 * angle
+		}
+	case "drone":
+		initState = []float64{0, 5, theta, 0, 0, 0}
+	case "spring_mass":
+		initState = []float64{1.0, 0}
 	}
 
 	fmt.Printf("comparing integrators for %s (dt=%.4f, duration=%.1fs)\n\n", model, dt, duration)
@@ -922,10 +926,10 @@ func compareIntegrators(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		ctrl := controllers.NewNone(dyn.ControlDim())
-		s := sim.New(dyn, integ, ctrl)
+		ctrl := control.NewNone(dyn.ControlDim())
+		s := dynamo.New(dyn, integ, ctrl)
 
-		cfg := sim.Config{Dt: dt, Duration: duration}
+		cfg := dynamo.Config{Dt: dt, Duration: duration}
 
 		start := time.Now()
 		result, err := s.Run(context.Background(), initState, cfg)
@@ -950,7 +954,7 @@ func compareIntegrators(cmd *cobra.Command, args []string) error {
 func exportJSON(cmd *cobra.Command, args []string) error {
 	runID := args[0]
 
-	st := store.New(dataDir)
+	st := storage.New(dataDir)
 	meta, err := st.Load(runID)
 	if err != nil {
 		return err
@@ -961,8 +965,8 @@ func exportJSON(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	result := &sim.Result{
-		States:  make([]sim.State, len(states)),
+	result := &dynamo.Result{
+		States:  make([]dynamo.State, len(states)),
 		Times:   times,
 		Metrics: meta.Metrics,
 	}
@@ -970,5 +974,5 @@ func exportJSON(cmd *cobra.Command, args []string) error {
 		result.States[i] = s
 	}
 
-	return store.ExportJSONStdout(meta.Model, meta.Integrator, meta.Controller, meta.Dt, meta.Duration, result)
+	return storage.ExportJSONStdout(meta.ID, meta.Model, meta.Integrator, meta.Controller, meta.Dt, meta.Duration, result)
 }
