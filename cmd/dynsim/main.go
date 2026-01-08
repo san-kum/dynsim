@@ -56,6 +56,8 @@ var (
 	preset string
 )
 
+// main is the entry point for the dynsim CLI; it registers commands and flags, launches the interactive GUI when no subcommand is provided, and executes the root command.
+// It exits the process with status 1 if command execution returns an error.
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "dynsim",

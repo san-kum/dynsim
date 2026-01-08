@@ -66,6 +66,12 @@ type trailPoint struct {
 	x, y, velocity float64
 }
 
+// NewInteractiveApp constructs a new interactive application model initialized in the menu state.
+// The model is pre-populated with a list of supported simulation names (pendulum, double_pendulum, cartpole,
+// spring_mass, drone, nbody, lorenz, rossler, vanderpol, threebody, coupled, masschain, gyroscope, wave,
+// doublewell, duffing, magnetic, fluid), a default parameter map (theta: 0.5, theta2: 0.5, omega: 0.0, omega2: 0.0,
+// pos: 0.0, vel: 0.0, dt: 0.01, duration: 30.0), initial parameter ordering ["theta", "omega", "dt", "duration"],
+// a timestep dt of 0.01, playback speed of 1.0, and default terminal dimensions 80x24.
 func NewInteractiveApp() *model {
 	return &model{
 		state:      stateMenu,
