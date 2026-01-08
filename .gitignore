@@ -6,8 +6,9 @@
 *.test
 *.out
 
+dynsim
 .dynsim/
-
+./dynsim
 pkg/
 bin/
 tests/

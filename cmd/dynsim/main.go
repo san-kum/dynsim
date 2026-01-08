@@ -16,8 +16,9 @@ import (
 	"github.com/san-kum/dynsim/internal/analysis"
 	"github.com/san-kum/dynsim/internal/config"
 	"github.com/san-kum/dynsim/internal/control"
-	"github.com/san-kum/dynsim/internal/experiment"
 	"github.com/san-kum/dynsim/internal/dynamo"
+	"github.com/san-kum/dynsim/internal/experiment"
+	"github.com/san-kum/dynsim/internal/gui"
 	"github.com/san-kum/dynsim/internal/storage"
 	"github.com/san-kum/dynsim/internal/viz"
 	"github.com/spf13/cobra"
@@ -60,11 +61,8 @@ func main() {
 		Use:   "dynsim",
 		Short: "physics and control simulation lab",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Default to interactive mode when no command given
-			if err := viz.RunInteractive(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
+			// Default to interactive GUI mode when no command given
+			gui.RunInteractive()
 		},
 	}
 
@@ -168,10 +166,9 @@ func main() {
 		RunE:  exportCSV,
 	}
 
-	interactiveCmd := &cobra.Command{
-		Use:     "interactive",
-		Short:   "interactive TUI mode",
-		Aliases: []string{"i", "ui"},
+	tuiCmd := &cobra.Command{
+		Use:   "tui",
+		Short: "legacy terminal TUI mode",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return viz.RunInteractive()
 		},
@@ -212,7 +209,20 @@ func main() {
 		RunE:  exportJSON,
 	}
 
-	rootCmd.AddCommand(runCmd, listCmd, plotCmd, exportCmd, benchCmd, analyzeCmd, liveCmd, phaseCmd, exportCSVCmd, interactiveCmd, compareCmd, presetsCmd, exportJSONCmd)
+	guiCmd := &cobra.Command{
+		Use:   "gui [model]",
+		Short: "run simulation with high-performance GUI",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			model := "fluid"
+			if len(args) > 0 {
+				model = args[0]
+			}
+			gui.Run(model)
+		},
+	}
+
+	rootCmd.AddCommand(runCmd, listCmd, plotCmd, exportCmd, benchCmd, analyzeCmd, liveCmd, phaseCmd, exportCSVCmd, tuiCmd, compareCmd, presetsCmd, exportJSONCmd, guiCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
