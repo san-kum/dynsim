@@ -440,8 +440,36 @@ func (m *Model) draw() {
 		m.drawDuffing()
 	case "magnetic":
 		m.drawMagneticPendulum()
+	case "fluid":
+		m.drawSPH()
 	default:
 		m.drawGeneric()
+	}
+}
+
+// ... existing code ...
+
+func (m *Model) drawSPH() {
+	n := len(m.state) / 4
+	if n < 1 {
+		return
+	}
+	cw, ch := m.width*2, m.height*4
+	// bounds are 60x40 in physics, map to screen
+	scaleX, scaleY := float64(cw)/60.0, float64(ch)/40.0
+	for i := 0; i < n; i++ {
+		x, y := m.state[i*4], m.state[i*4+1]
+		// crude density visualization: just draw a block
+		px, py := int(x*scaleX), ch-int(y*scaleY)
+		if px >= 0 && px < cw && py >= 0 && py < ch {
+			// heavier particles (denser) get a block, lighter get dots
+			// but we don't have density here easily without recomputing.
+			// so just draw a block for now.
+			m.canvas.Set(px, py)
+			m.canvas.Set(px+1, py)
+			m.canvas.Set(px, py+1)
+			m.canvas.Set(px+1, py+1)
+		}
 	}
 }
 

@@ -31,6 +31,20 @@ func NewNBody(n int) *NBody {
 	}
 }
 
+func (nb *NBody) DefaultState() dynamo.State {
+	n := nb.NumBodies
+	state := make(dynamo.State, n*4)
+	for i := 0; i < n; i++ {
+		angle := float64(i) * 2.0 * 3.14159 / float64(n)
+		radius := 1.0
+		state[i*4] = radius * math.Cos(angle)
+		state[i*4+1] = radius * math.Sin(angle)
+		state[i*4+2] = -math.Sin(angle) * 0.5
+		state[i*4+3] = math.Cos(angle) * 0.5
+	}
+	return state
+}
+
 func (nb *NBody) StateDim() int   { return nb.NumBodies * 4 }
 func (nb *NBody) ControlDim() int { return 0 }
 

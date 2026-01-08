@@ -30,6 +30,7 @@ var modelInfo = map[string]string{
 	"rossler": "spiral chaos", "vanderpol": "limit cycle oscillator", "threebody": "orbital chaos", "coupled": "energy transfer",
 	"masschain": "wave propagation", "gyroscope": "rigid body rotation", "wave": "string vibration", "doublewell": "bistable potential",
 	"duffing": "chaotic oscillator", "magnetic": "fractal basins",
+	"fluid": "smoothed particle hydrodynamics",
 }
 
 const (
@@ -68,7 +69,7 @@ type trailPoint struct {
 func NewInteractiveApp() *model {
 	return &model{
 		state:      stateMenu,
-		models:     []string{"pendulum", "double_pendulum", "cartpole", "spring_mass", "drone", "nbody", "lorenz", "rossler", "vanderpol", "threebody", "coupled", "masschain", "gyroscope", "wave", "doublewell", "duffing", "magnetic"},
+		models:     []string{"pendulum", "double_pendulum", "cartpole", "spring_mass", "drone", "nbody", "lorenz", "rossler", "vanderpol", "threebody", "coupled", "masschain", "gyroscope", "wave", "doublewell", "duffing", "magnetic", "fluid"},
 		params:     map[string]float64{"theta": 0.5, "theta2": 0.5, "omega": 0.0, "omega2": 0.0, "pos": 0.0, "vel": 0.0, "dt": 0.01, "duration": 30.0},
 		paramNames: []string{"theta", "omega", "dt", "duration"},
 		dt:         0.01, speed: 1.0, width: 80, height: 24,
@@ -198,6 +199,8 @@ func (m *model) setParamsForModel() {
 		m.paramNames = []string{"dt", "duration"}
 	case "coupled":
 		m.paramNames = []string{"theta1", "omega1", "theta2", "omega2", "dt", "duration"}
+	case "fluid":
+		m.paramNames = []string{"h", "rho0", "stiffness", "viscosity", "gravity", "dt", "duration"}
 	}
 	for _, name := range m.paramNames {
 		if _, ok := m.params[name]; !ok {
@@ -268,6 +271,9 @@ func (m *model) start() tea.Cmd {
 	case "magnetic":
 		mp := physics.NewMagneticPendulum()
 		dyn, state = mp, mp.DefaultState()
+	case "fluid":
+		sp := physics.NewSPH(200)
+		dyn, state = sp, sp.DefaultState()
 	default:
 		dyn, state = physics.NewPendulum(), []float64{0.5, 0}
 	}
