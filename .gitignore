@@ -1,23 +1,44 @@
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
 *.test
 *.out
 
-dynsim
-.dynsim/
-./dynsim
+/cmd/dynsim/dynsim
+/dynsim
+/bin/
 pkg/
-bin/
-tests/
 
-coverage.out
-coverage.txt
 *.cover
 *.prof
 *.pprof
+coverage.out
+coverage.txt
+
+tests/
+/tests/dynsim_test_bin
+
+*.o
+*.a
+*.ptx
+*.cubin
+*.fatbin
+*.log
+
+/internal/compute/kernels.o
+/internal/compute/libkernels.a
+
+results/
+outputs/
+data/
+tmp/
+cache/
+logs/
+simulation.gif
+
+testdata/*.bin
+testdata/*.out
 
 .vscode/
 .idea/
@@ -25,31 +46,16 @@ coverage.txt
 *.swo
 *~
 .DS_Store
-
 Thumbs.db
-
-*.log
-logs/
-
-results/
-outputs/
-data/
-tmp/
-cache/
-
-testdata/*.bin
-testdata/*.out
 
 .env
 .env.local
 .env.*.local
 
-/cmd/dynsim/dynsim
-/dynsim/dynsim
+.dynsim/
+.fuse_hidden*
 
 *.tmp
 *.bak
 *.old
 
-
-.fuse_hidden*

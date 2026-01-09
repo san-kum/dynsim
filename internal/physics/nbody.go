@@ -1,7 +1,11 @@
 package physics
 
 import (
+	"fmt"
 	"math"
+	"math/rand"
+	"runtime"
+	"sync"
 
 	"github.com/san-kum/dynsim/internal/compute"
 	"github.com/san-kum/dynsim/internal/dynamo"
@@ -32,21 +36,119 @@ func NewNBody(n int) *NBody {
 }
 
 func (nb *NBody) DefaultState() dynamo.State {
+	// Realistic Galaxy Generator (Bulge + Spiral Disk + Halo)
 	n := nb.NumBodies
 	state := make(dynamo.State, n*4)
-	for i := 0; i < n; i++ {
-		angle := float64(i) * 2.0 * 3.14159 / float64(n)
-		radius := 1.0
-		state[i*4] = radius * math.Cos(angle)
-		state[i*4+1] = radius * math.Sin(angle)
-		state[i*4+2] = -math.Sin(angle) * 0.5
-		state[i*4+3] = math.Cos(angle) * 0.5
+	rnd := rand.New(rand.NewSource(42)) // Fixed seed for reproducibility
+
+	// Distribution Ratios
+	nBulge := int(float64(n) * 0.10)
+	nHalo := int(float64(n) * 0.05)
+	nDisk := n - nBulge - nHalo
+
+	// 1. Generate Positions
+	// Central Black Hole (Body 0) - Supermassive anchor
+	nb.Masses[0] = 500000.0 // Supermassive (Scaled for stability)
+	state[0], state[1] = 0, 0
+	state[2], state[3] = 0, 0
+
+	idx := 1
+
+	// Bulge (Spherical, dense, hot)
+	for i := 0; i < nBulge; i++ {
+		if idx >= n {
+			break
+		}
+		r := math.Abs(rnd.NormFloat64()) * 20.0 // Compact
+		theta := rnd.Float64() * 2 * math.Pi
+		state[idx*4] = r * math.Cos(theta)
+		state[idx*4+1] = r * math.Sin(theta)
+		idx++
 	}
+
+	// Disk (Spiral Arms, Exponential Decay)
+	arms := 2.0
+	armTwist := 5.0
+	for i := 0; i < nDisk; i++ {
+		if idx >= n {
+			break
+		}
+		// Exponential falloff for density
+		r := 20.0 + math.Abs(rnd.NormFloat64())*100.0 + rnd.ExpFloat64()*30.0
+		if r > 300 {
+			r = 300
+		}
+
+		// Spiral Angle
+		baseAngle := (float64(i%int(arms)) / arms) * 2 * math.Pi
+		angle := baseAngle + armTwist*math.Log(r/20.0) + (rnd.Float64()-0.5)*0.5
+
+		state[idx*4] = r * math.Cos(angle)
+		state[idx*4+1] = r * math.Sin(angle)
+		idx++
+	}
+
+	// Halo (Distant, Scattered)
+	for i := 0; i < nHalo; i++ {
+		if idx >= n {
+			break
+		}
+		r := 100.0 + math.Abs(rnd.NormFloat64())*200.0
+		theta := rnd.Float64() * 2 * math.Pi
+		state[idx*4] = r * math.Cos(theta)
+		state[idx*4+1] = r * math.Sin(theta)
+		idx++
+	}
+
+	// 2. Stability Pre-Pass (The "Cold Start" Fix)
+	// Calculate exact gravitational acceleration for every particle based on the generated configuration using the Parallel Solver.
+	// Then set velocity to circular orbit speed.
+
+	fmt.Println("Simulating initial gravity for stability...")
+	ax, ay := nb.computeForcesCPU(state)
+
+	for i := 1; i < n; i++ {
+		xi, yi := state[i*4], state[i*4+1]
+		dist := math.Sqrt(xi*xi + yi*yi)
+		if dist < 0.1 {
+			continue
+		}
+
+		// Net Acceleration Vector
+		aci_x, aci_y := ax[i], ay[i]
+
+		// Radial acceleration magnitude
+		a_mag := math.Sqrt(aci_x*aci_x + aci_y*aci_y)
+
+		// Circular Velocity v = sqrt(a * r)
+		v := math.Sqrt(a_mag * dist)
+
+		// Radial unit vector:
+		ux, uy := xi/dist, yi/dist
+
+		// Direction: Tangent to radius (-y, x) for CCW rotation
+		state[i*4+2] = -v * uy
+		state[i*4+3] = v * ux
+
+		// Add "Temperature" (Random Velocity Dispersion)
+		dispersion := 0.0
+		if i < nBulge {
+			dispersion = v * 0.4
+		} else if i > n-nHalo {
+			dispersion = v * 0.5
+		} else {
+			dispersion = v * 0.05
+		}
+
+		state[i*4+2] += (rnd.Float64() - 0.5) * dispersion
+		state[i*4+3] += (rnd.Float64() - 0.5) * dispersion
+	}
+
 	return state
 }
 
 func (nb *NBody) StateDim() int   { return nb.NumBodies * 4 }
-func (nb *NBody) ControlDim() int { return 0 }
+func (nb *NBody) ControlDim() int { return 3 } // [CursorX, CursorY, Strength]
 
 func (nb *NBody) Derive(x dynamo.State, u dynamo.Control, t float64) dynamo.State {
 	n := nb.NumBodies
@@ -65,11 +167,32 @@ func (nb *NBody) Derive(x dynamo.State, u dynamo.Control, t float64) dynamo.Stat
 		ax, ay = nb.computeForcesCPU(x)
 	}
 
+	// Interaction (Hand of God)
+	cursorX, cursorY, cursorStr := 0.0, 0.0, 0.0
+	if len(u) == 3 {
+		cursorX, cursorY, cursorStr = u[0], u[1], u[2]
+	}
+
 	for i := 0; i < n; i++ {
 		dx[i*4] = x[i*4+2]
 		dx[i*4+1] = x[i*4+3]
-		dx[i*4+2] = ax[i]
-		dx[i*4+3] = ay[i]
+
+		// Add Interaction Force
+		ix, iy := 0.0, 0.0
+		if cursorStr != 0 {
+			xi, yi := x[i*4], x[i*4+1]
+			rx := cursorX - xi
+			ry := cursorY - yi
+			dist2 := rx*rx + ry*ry + 5.0 // Softening for cursor
+			dist := math.Sqrt(dist2)
+			f := cursorStr * 20.0 / (dist * dist2) // InvSq Force
+
+			ix = f * rx
+			iy = f * ry
+		}
+
+		dx[i*4+2] = ax[i] + ix
+		dx[i*4+3] = ay[i] + iy
 	}
 
 	return dx
@@ -81,29 +204,47 @@ func (nb *NBody) computeForcesCPU(x dynamo.State) ([]float64, []float64) {
 	ay := make([]float64, n)
 	eps2 := nb.Softening * nb.Softening
 
-	for i := 0; i < n; i++ {
-		xi, yi := x[i*4], x[i*4+1]
+	// Parallel Execution
+	numWorkers := runtime.NumCPU()
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
 
-		for j := i + 1; j < n; j++ {
-			xj, yj := x[j*4], x[j*4+1]
+	chunkSize := (n + numWorkers - 1) / numWorkers
 
-			rx := xj - xi
-			ry := yj - yi
-			r2 := rx*rx + ry*ry + eps2
-
-			rInv := 1.0 / math.Sqrt(r2)
-			r3Inv := rInv * rInv * rInv
-
-			fij := nb.G * nb.Masses[j] * r3Inv
-			ax[i] += fij * rx
-			ay[i] += fij * ry
-
-			fji := nb.G * nb.Masses[i] * r3Inv
-			ax[j] -= fji * rx
-			ay[j] -= fji * ry
+	for w := 0; w < numWorkers; w++ {
+		start := w * chunkSize
+		end := start + chunkSize
+		if end > n {
+			end = n
 		}
+
+		go func(start, end int) {
+			defer wg.Done()
+			for i := start; i < end; i++ {
+				xi, yi := x[i*4], x[i*4+1]
+				fx, fy := 0.0, 0.0
+
+				for j := 0; j < n; j++ {
+					if i == j {
+						continue
+					}
+					xj, yj := x[j*4], x[j*4+1]
+					rx := xj - xi
+					ry := yj - yi
+					dist2 := rx*rx + ry*ry + eps2
+					invDist := 1.0 / math.Sqrt(dist2)
+					invDist3 := invDist * invDist * invDist
+					f := nb.G * nb.Masses[j] * invDist3
+					fx += f * rx
+					fy += f * ry
+				}
+				ax[i] = fx
+				ay[i] = fy
+			}
+		}(start, end)
 	}
 
+	wg.Wait()
 	return ax, ay
 }
 

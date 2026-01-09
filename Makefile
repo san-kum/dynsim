@@ -1,7 +1,7 @@
 .PHONY: build test test-all test-integration test-fuzz test-stress clean cuda
 
 build:
-	go build -o dynsim cmd/dynsim/main.go
+	go build -tags cuda -o dynsim cmd/dynsim/main.go
 
 cuda:
 	./build_cuda.sh
