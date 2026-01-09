@@ -68,18 +68,24 @@ type App struct {
 	GLBackend  *compute.OpenGLBackend
 }
 
+// initWindow initializes the Raylib window with size 1280×720 and title "dynsim", sets the target FPS to 60, and disables the default exit key.
 func initWindow() {
 	rl.InitWindow(1280, 720, "dynsim")
 	rl.SetTargetFPS(60)
 	rl.SetExitKey(0)
 }
 
+// loadFont loads the Liberation Mono font from the system path and enables bilinear texture filtering.
+// It returns the loaded rl.Font ready for use in rendering.
 func loadFont() rl.Font {
 	font := rl.LoadFontEx("/usr/share/fonts/liberation/LiberationMono-Regular.ttf", 32, nil, 0)
 	rl.SetTextureFilter(font.Texture, rl.FilterBilinear)
 	return font
 }
 
+// NewApp creates and initializes an App configured for either interactive menu-driven use or direct model execution.
+// If interactive is false, the provided startModel is loaded immediately; otherwise the app starts in the model selection menu.
+// It returns a pointer to the initialized App.
 func NewApp(startModel string, interactive bool) *App {
 	models := []string{
 		"fluid", "nbody", "lorenz", "rossler", "pendulum", "double_pendulum", "cartpole",
@@ -141,6 +147,8 @@ func NewApp(startModel string, interactive bool) *App {
 	return app
 }
 
+// RunInteractive initializes the graphical window, creates an interactive App, and enters its main run loop.
+// It blocks until the window is closed and ensures Raylib's window is closed on return.
 func RunInteractive() {
 	initWindow()
 	defer rl.CloseWindow()
@@ -148,6 +156,8 @@ func RunInteractive() {
 	app.RunLoop()
 }
 
+// Run starts a non-interactive GUI session for the specified model and enters the main update-draw loop.
+// It initializes the window, loads modelName into the application, and blocks until the window is closed.
 func Run(modelName string) {
 	initWindow()
 	defer rl.CloseWindow()

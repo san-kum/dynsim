@@ -20,6 +20,12 @@ type NBody struct {
 	positions []float64
 }
 
+// NewNBody creates and returns an NBody configured for n bodies.
+// 
+// The returned NBody has masses initialized to 1.0 for every body, gravitational
+// constant G set to 1.0, softening length set to 0.01, the UseGPU flag set
+// according to the compute backend availability, and an internal positions
+// buffer sized for n (x,y) pairs.
 func NewNBody(n int) *NBody {
 	masses := make([]float64, n)
 	for i := range masses {

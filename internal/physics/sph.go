@@ -16,7 +16,9 @@ type SPH struct {
 	BoundsX, BoundsY        float64
 }
 
-// NewSPH creates a dam break scenario
+// NewSPH creates an SPH simulator configured for a dam-break scenario with n particles.
+// If n is less than 100 it will be increased to 100. The returned *SPH is populated
+// with sensible default physical parameters (H, Rho0, K, Mu, Gravity, Mass) and domain bounds.
 func NewSPH(n int) *SPH {
 	if n < 100 {
 		n = 100
@@ -30,7 +32,9 @@ func NewSPH(n int) *SPH {
 func (s *SPH) StateDim() int   { return s.N * 4 } // x, y, vx, vy
 func (s *SPH) ControlDim() int { return 3 }       // [CursorX, CursorY, Strength]
 
-// kernels because math is hard
+// poly6 computes the Poly6 smoothing kernel value for SPH given the squared
+// distance r2 and the squared smoothing length h2. It returns 0 when r2 > h2;
+// otherwise it returns the normalized (h2 - r2)^3 kernel value.
 func poly6(r2, h2 float64) float64 {
 	if r2 > h2 {
 		return 0
@@ -38,6 +42,8 @@ func poly6(r2, h2 float64) float64 {
 	return 315.0 / (64.0 * math.Pi * math.Pow(h2, 4.5)) * math.Pow(h2-r2, 3)
 }
 
+// spikyGrad computes the radial derivative (magnitude) of the spiky smoothing kernel for distance r and kernel radius h.
+// It returns 0 when r is greater than h or when r is very close to zero to avoid singular behavior.
 func spikyGrad(r, h float64) float64 {
 	if r > h || r < 1e-6 {
 		return 0
@@ -45,6 +51,8 @@ func spikyGrad(r, h float64) float64 {
 	return -45.0 / (math.Pi * math.Pow(h, 6)) * math.Pow(h-r, 2)
 }
 
+// viscLap evaluates the Laplacian of the SPH viscosity kernel for distance r and smoothing length h.
+// It returns 0 when r > h; otherwise it returns the kernel value proportional to (h - r).
 func viscLap(r, h float64) float64 {
 	if r > h {
 		return 0
