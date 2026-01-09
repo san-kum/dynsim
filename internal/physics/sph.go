@@ -28,7 +28,7 @@ func NewSPH(n int) *SPH {
 }
 
 func (s *SPH) StateDim() int   { return s.N * 4 } // x, y, vx, vy
-func (s *SPH) ControlDim() int { return 0 }
+func (s *SPH) ControlDim() int { return 3 }       // [CursorX, CursorY, Strength]
 
 // kernels because math is hard
 func poly6(r2, h2 float64) float64 {
@@ -52,10 +52,16 @@ func viscLap(r, h float64) float64 {
 	return 45.0 / (math.Pi * math.Pow(h, 6)) * (h - r)
 }
 
-func (s *SPH) Derive(state dynamo.State, _ dynamo.Control, _ float64) dynamo.State {
+func (s *SPH) Derive(state dynamo.State, u dynamo.Control, _ float64) dynamo.State {
 	n, h2 := s.N, s.H*s.H
 	deriv := make(dynamo.State, n*4)
 	rho, press := make([]float64, n), make([]float64, n)
+
+	// Interaction Force (Hand of God)
+	cursorX, cursorY, cursorStr := 0.0, 0.0, 0.0
+	if len(u) == 3 {
+		cursorX, cursorY, cursorStr = u[0], u[1], u[2]
+	}
 
 	// density & pressure
 	for i := 0; i < n; i++ {
@@ -93,6 +99,23 @@ func (s *SPH) Derive(state dynamo.State, _ dynamo.Control, _ float64) dynamo.Sta
 				fv := s.Mu * s.Mass * viscLap(dist, s.H) / rho[j]
 				fx += fv * (state[j*4+2] - vxi)
 				fy += fv * (state[j*4+3] - vyi)
+			}
+		}
+
+		// Interaction (Mouse Force)
+		if cursorStr != 0 {
+			dx, dy := xi-cursorX, yi-cursorY
+			dist := math.Sqrt(dx*dx + dy*dy)
+			radius := 10.0 // Interaction radius
+			if dist < radius {
+				// Radial force: F = Str * (1 - dist/R)
+				// Repel if Str < 0, Attract if Str > 0
+				// Actually, let's vector direction:
+				// To attract (Str > 0), we want Force towards Cursor.
+				// dx is (Particle - Cursor). So Force should be -dx.
+				strength := cursorStr * (1.0 - dist/radius) * 5.0 // Scale factor
+				fx -= strength * dx / (dist + 0.1) * rho[i]       // Scale by density to move mass
+				fy -= strength * dy / (dist + 0.1) * rho[i]
 			}
 		}
 
